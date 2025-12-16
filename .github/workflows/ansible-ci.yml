@@ -140,9 +140,8 @@ jobs:
     needs: [lint, syntax-check, security-scan]
     if: |
       github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.deploy == 'true' &&
-      github.ref == 'refs/heads/main'
-    environment: production
+      github.event.inputs.deploy == 'true'
+    # environment: production  # Uncomment and create environment for production deployments
 
     steps:
       - name: Checkout code
