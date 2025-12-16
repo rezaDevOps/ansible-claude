@@ -1,0 +1,36 @@
+---
+# Ansible-lint configuration
+
+profile: production
+
+# Exclude specific paths
+exclude_paths:
+  - .github/
+  - venv/
+  - .venv/
+  - scripts/
+
+# Skip specific rules that are too strict for this project
+skip_list:
+  - role-name[path]  # Allow flexible role naming
+  - no-handler  # Allow tasks without handlers
+  - risky-file-permissions  # Allow tasks without explicit mode
+  - run-once[task]  # Allow run_once without checking strategy
+  - yaml[line-length]  # Allow long lines (handled by yamllint)
+
+# Enable offline mode (no internet required for linting)
+offline: false
+
+# Set maximum line length
+max_line_length: 160
+
+# Enable specific rules
+enable_list:
+  - yaml
+
+# Warning list (won't fail, just warn)
+warn_list:
+  - experimental
+  - jinja[spacing]
+  - package-latest  # Warn about using 'latest' but don't fail
+  - no-role-prefix  # Warn about missing role prefix but don't fail

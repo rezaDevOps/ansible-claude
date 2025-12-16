@@ -5,7 +5,7 @@
 - name: Reset UFW to default (clean slate)
   community.general.ufw:
     state: reset
-  register: ufw_reset
+  register: firewall_ufw_reset
 
 - name: Set UFW default incoming policy to deny
   community.general.ufw:
@@ -37,7 +37,7 @@
     rule: allow
     port: "{{ item.port }}"
     proto: "{{ item.proto }}"
-    comment: "{{ item.comment | default('Allow ' + item.port|string) }}"
+    comment: "{{ item.comment | default('Allow ' + item.port | string) }}"
   loop: "{{ firewall_allowed_ports }}"
   when: item.port != 22  # SSH already configured above with IP restrictions
 
@@ -57,7 +57,7 @@
 
 - name: Get UFW status
   ansible.builtin.command: ufw status verbose
-  register: ufw_status
+  register: firewall_ufw_status
   changed_when: false
 
 - name: Display UFW configuration
@@ -71,4 +71,4 @@
       - "  - HTTPS (443/tcp) from: anywhere"
       - ""
       - "Current UFW status:"
-      - "{{ ufw_status.stdout_lines }}"
+      - "{{ firewall_ufw_status.stdout_lines }}"

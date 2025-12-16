@@ -25,7 +25,7 @@
     owner: "{{ app_user }}"
     group: "{{ app_group }}"
     mode: '0644'
-  notify: restart app
+  notify: Restart app
 
 - name: Copy requirements.txt
   ansible.builtin.copy:
@@ -39,14 +39,17 @@
   ansible.builtin.command:
     cmd: "{{ python_version }} -m venv {{ venv_path }}"
     creates: "{{ venv_path }}/bin/activate"
+  become: true
   become_user: "{{ app_user }}"
 
 - name: Upgrade pip in virtual environment
   ansible.builtin.pip:
     name: pip
-    state: latest
+    state: present
+    extra_args: --upgrade
     virtualenv: "{{ venv_path }}"
     virtualenv_command: "{{ python_version }} -m venv"
+  become: true
   become_user: "{{ app_user }}"
 
 - name: Install Python dependencies in virtual environment
@@ -54,8 +57,9 @@
     requirements: "{{ app_root }}/requirements.txt"
     virtualenv: "{{ venv_path }}"
     virtualenv_command: "{{ python_version }} -m venv"
+  become: true
   become_user: "{{ app_user }}"
-  notify: restart app
+  notify: Restart app
 
 - name: Deploy systemd service file
   ansible.builtin.template:
@@ -65,8 +69,8 @@
     group: root
     mode: '0644'
   notify:
-    - reload systemd
-    - restart app
+    - Reload systemd
+    - Restart app
 
 - name: Ensure systemd is reloaded (flush handlers if needed)
   ansible.builtin.meta: flush_handlers

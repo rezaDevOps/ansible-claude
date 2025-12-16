@@ -59,14 +59,14 @@
     owner: root
     group: root
     mode: '0644'
-  notify: reload nginx
+  notify: Reload nginx
 
 - name: Enable Flask app site
   ansible.builtin.file:
     src: "/etc/nginx/sites-available/{{ app_name }}.conf"
     dest: "/etc/nginx/sites-enabled/{{ app_name }}.conf"
     state: link
-  notify: reload nginx
+  notify: Reload nginx
 
 - name: Test NGINX configuration
   ansible.builtin.command: nginx -t
