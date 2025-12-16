@@ -185,15 +185,59 @@ jobs:
           fi
           echo "✓ vault.yml is properly encrypted"
 
-      - name: Provision EC2 instance (if needed)
+      - name: Provision EC2 instance
         run: |
+          echo "Provisioning new EC2 instance..."
           ansible-playbook playbooks/provision.yml \
             -e "aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" \
             -e "aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             --vault-password-file .vault_pass
 
+      - name: Extract EC2 IP from instance info
+        run: |
+          # Check multiple possible locations
+          if [ -f ec2_instance_info.txt ]; then
+            INFO_FILE="ec2_instance_info.txt"
+          elif [ -f ./ec2_instance_info.txt ]; then
+            INFO_FILE="./ec2_instance_info.txt"
+          elif [ -f playbooks/ec2_instance_info.txt ]; then
+            INFO_FILE="playbooks/ec2_instance_info.txt"
+          else
+            echo "✗ ec2_instance_info.txt not found in any location!"
+            echo "Searching for file..."
+            find . -name "ec2_instance_info.txt" -type f || true
+            exit 1
+          fi
+
+          echo "✓ Found info file at: $INFO_FILE"
+          cat "$INFO_FILE"
+
+          EC2_IP=$(grep "Public IP:" "$INFO_FILE" | awk '{print $3}')
+          echo "EC2_IP=$EC2_IP" >> $GITHUB_ENV
+          echo "✓ Extracted EC2 IP: $EC2_IP"
+
+      - name: Update inventory with new IP
+        run: |
+          echo "Updating inventory/hosts.ini with IP: $EC2_IP"
+          sed -i "s/^127\.0\.0\.1.*/$EC2_IP  # Auto-updated by GitHub Actions/" inventory/hosts.ini
+          echo "✓ Inventory updated"
+          cat inventory/hosts.ini
+
+      - name: Wait for SSH to be available
+        run: |
+          echo "Waiting for SSH on $EC2_IP..."
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i ~/.ssh/ansible-ec2-key ubuntu@$EC2_IP 'exit' 2>/dev/null; then
+              echo "✓ SSH is ready!"
+              break
+            fi
+            echo "Attempt $i/30: SSH not ready yet, waiting..."
+            sleep 10
+          done
+
       - name: Deploy application
         run: |
+          echo "Deploying to $EC2_IP..."
           ansible-playbook -i inventory/hosts.ini playbooks/site.yml \
             --private-key ~/.ssh/ansible-ec2-key \
             --vault-password-file .vault_pass

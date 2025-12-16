@@ -138,5 +138,5 @@
 
           Update inventory/hosts.ini with this IP:
           {{ ec2_instance.instances[0].public_ip_address }}
-        dest: "./ec2_instance_info.txt"
+        dest: "{{ playbook_dir }}/../ec2_instance_info.txt"
       delegate_to: localhost
