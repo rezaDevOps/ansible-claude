@@ -169,7 +169,10 @@ jobs:
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ansible-ec2-key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ansible-ec2-key.pem
+          chmod 600 ~/.ssh/ansible-ec2-key.pem
+          # Also create without .pem extension for backward compatibility
+          cp ~/.ssh/ansible-ec2-key.pem ~/.ssh/ansible-ec2-key
           chmod 600 ~/.ssh/ansible-ec2-key
 
       - name: Setup Ansible Vault password
@@ -258,6 +261,7 @@ jobs:
         if: always()
         run: |
           rm -f ~/.ssh/ansible-ec2-key
+          rm -f ~/.ssh/ansible-ec2-key.pem
           rm -f .vault_pass
 
   notification:
