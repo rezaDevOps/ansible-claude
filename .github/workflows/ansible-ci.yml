@@ -189,10 +189,12 @@ jobs:
       - name: Provision EC2 instance
         run: |
           echo "Provisioning new EC2 instance..."
-          ansible-playbook playbooks/provision.yml \
-            -e "aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            -e "aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+          ansible-playbook -i inventory/localhost.ini playbooks/provision.yml \
             --vault-password-file .vault_pass
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Extract EC2 IP from instance info
         run: |
