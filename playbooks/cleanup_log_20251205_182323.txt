@@ -1,0 +1,12 @@
+# AWS Cleanup Log
+# Generated: 2025-12-05T18:23:23
+
+Region: us-west-2
+Instances terminated: 1
+Security group deleted: ansible-ec2-sg
+Key pair deleted: ansible-ec2-keypair
+
+Terminated instance IDs:
+- i-0d502a70307bc2ed7 (35.94.198.155)
+
+All AWS resources have been destroyed.

@@ -1,0 +1,110 @@
+---
+# Role: nginx
+# Purpose: Install and configure NGINX as reverse proxy for Flask application
+
+- name: Install NGINX
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: Ensure NGINX is stopped before configuration
+  ansible.builtin.systemd:
+    name: nginx
+    state: stopped
+
+- name: Purge nginx completely
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - nginx-common
+      - nginx-core
+    state: absent
+    purge: yes
+
+- name: Remove /etc/nginx directory
+  ansible.builtin.file:
+    path: /etc/nginx
+    state: absent
+
+- name: Install nginx fresh
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: Verify nginx.conf exists
+  ansible.builtin.stat:
+    path: /etc/nginx/nginx.conf
+  register: nginx_conf_check
+  failed_when: not nginx_conf_check.stat.exists
+
+- name: Ensure nginx is stopped after reinstall
+  ansible.builtin.systemd:
+    name: nginx
+    state: stopped
+
+- name: Remove default NGINX site
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/sites-enabled/default
+    - /etc/nginx/sites-available/default
+
+- name: Deploy Flask app NGINX configuration
+  ansible.builtin.template:
+    src: flask-app.conf.j2
+    dest: "/etc/nginx/sites-available/{{ app_name }}.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload nginx
+
+- name: Enable Flask app site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ app_name }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ app_name }}.conf"
+    state: link
+  notify: reload nginx
+
+- name: Test NGINX configuration
+  ansible.builtin.command: nginx -t
+  register: nginx_test
+  changed_when: false
+  failed_when: nginx_test.rc != 0
+
+- name: Ensure NGINX is started and enabled
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: yes
+
+- name: Flush handlers to reload NGINX
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for NGINX to be ready
+  ansible.builtin.wait_for:
+    port: 80
+    host: 0.0.0.0
+    delay: 2
+    timeout: 30
+
+- name: Test NGINX proxy to application
+  ansible.builtin.uri:
+    url: "http://127.0.0.1"
+    return_content: yes
+    status_code: 200
+  register: nginx_test_result
+  retries: 3
+  delay: 2
+  until: nginx_test_result.status == 200
+
+- name: Display NGINX deployment status
+  ansible.builtin.debug:
+    msg:
+      - "NGINX configured successfully"
+      - "Reverse proxy active for {{ app_name }}"
+      - "Listening on: 0.0.0.0:80"
+      - "Proxying to: {{ nginx_upstream_servers | join(', ') }}"
+      - "Access the application at: http://{{ ansible_host }}"

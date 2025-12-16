@@ -1,0 +1,175 @@
+---
+# Role: base
+# Purpose: System hardening, package updates, security configurations
+
+- name: Update all packages to latest version
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: yes
+    cache_valid_time: 3600
+  register: apt_upgrade_result
+
+- name: Install essential packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - vim
+      - git
+      - build-essential
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - ufw
+      - fail2ban
+      - unattended-upgrades
+      - python3
+      - python3-pip
+      - python3-venv
+      - python3-dev
+    state: present
+    update_cache: yes
+
+- name: Set system timezone
+  community.general.timezone:
+    name: "{{ system_timezone }}"
+
+- name: Configure unattended-upgrades for automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+          "${distro_id}ESMApps:${distro_codename}-apps-security";
+          "${distro_id}ESM:${distro_codename}-infra-security";
+      };
+      Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+      Unattended-Upgrade::MinimalSteps "true";
+      Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "false";
+    mode: '0644'
+  when: enable_unattended_upgrades | bool
+
+- name: Enable automatic updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+      APT::Periodic::Unattended-Upgrade "1";
+    mode: '0644'
+  when: enable_unattended_upgrades | bool
+
+- name: Configure fail2ban for SSH protection
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      [DEFAULT]
+      bantime = {{ fail2ban_bantime }}
+      findtime = {{ fail2ban_findtime }}
+      maxretry = {{ fail2ban_maxretry }}
+      banaction = ufw
+
+      [sshd]
+      enabled = true
+      port = {{ ssh_port }}
+      filter = sshd
+      logpath = /var/log/auth.log
+    mode: '0644'
+  notify: restart fail2ban
+
+- name: Ensure fail2ban is started and enabled
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+
+- name: Deploy hardened SSH configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0600'
+    validate: '/usr/sbin/sshd -t -f %s'
+    backup: yes
+  notify: restart sshd
+
+- name: Disable root login via SSH
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin no'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: restart sshd
+
+- name: Disable password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: restart sshd
+
+- name: Set proper permissions on sensitive files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: '0600'
+    owner: root
+    group: root
+  loop:
+    - /etc/ssh/sshd_config
+    - /etc/shadow
+  failed_when: false
+
+- name: Remove unnecessary packages
+  ansible.builtin.apt:
+    name:
+      - snapd  # Optional: remove if not needed
+    state: absent
+    purge: yes
+  failed_when: false
+
+- name: Disable unnecessary services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - snapd.service
+    - snapd.socket
+  failed_when: false
+
+- name: Configure kernel parameters for security
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-security.conf
+    reload: yes
+  loop:
+    - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+    - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+    - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.all.secure_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.secure_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+    - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+    - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+    - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+    - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+    - { name: 'net.ipv4.conf.default.log_martians', value: '1' }
+
+- name: Display base role completion
+  ansible.builtin.debug:
+    msg:
+      - "Base system hardening completed"
+      - "Automatic security updates: {{ 'enabled' if enable_unattended_upgrades else 'disabled' }}"
+      - "Fail2ban SSH protection: enabled"
+      - "SSH hardened: root login disabled, password auth disabled"

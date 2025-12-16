@@ -1,0 +1,66 @@
+---
+# Main deployment playbook
+# Run with: ansible-playbook -i inventory/hosts.ini playbooks/site.yml --private-key ~/.ssh/ansible-ec2-key
+
+- name: Deploy Flask Application to EC2
+  hosts: ec2_instances
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - ../group_vars/all.yml
+
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      changed_when: false
+
+    - name: Wait for cloud-init to complete
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      failed_when: false
+
+  roles:
+    - role: users
+      tags: ['users', 'security']
+
+    - role: base
+      tags: ['base', 'security', 'hardening']
+
+    - role: firewall
+      tags: ['firewall', 'security']
+
+    - role: app
+      tags: ['app', 'application', 'deploy']
+
+    - role: nginx
+      tags: ['nginx', 'web', 'proxy']
+
+  post_tasks:
+    - name: Verify application is running
+      ansible.builtin.uri:
+        url: "http://localhost"
+        status_code: 200
+        return_content: yes
+      register: app_response
+      retries: 3
+      delay: 5
+      until: app_response.status == 200
+      changed_when: false
+
+    - name: Display deployment success message
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Deployment completed successfully!"
+          - "=========================================="
+          - "Application URL: http://{{ ansible_host }}"
+          - "SSH as deployer: ssh -i {{ local_ssh_private_key }} {{ deployer_user }}@{{ ansible_host }}"
+          - ""
+          - "Verification commands:"
+          - "  sudo systemctl status {{ app_name }}"
+          - "  sudo systemctl status nginx"
+          - "  sudo ufw status verbose"
+          - "  curl http://{{ ansible_host }}"
+          - "=========================================="

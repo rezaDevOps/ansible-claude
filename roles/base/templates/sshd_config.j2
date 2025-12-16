@@ -1,0 +1,56 @@
+# Hardened SSH configuration
+# Managed by Ansible - DO NOT EDIT MANUALLY
+
+# Port and protocol settings
+Port {{ ssh_port }}
+Protocol 2
+
+# Authentication settings
+PermitRootLogin {{ ssh_permit_root_login }}
+PubkeyAuthentication {{ ssh_pubkey_authentication }}
+PasswordAuthentication {{ ssh_password_authentication }}
+ChallengeResponseAuthentication {{ ssh_challenge_response_auth }}
+UsePAM {{ ssh_use_pam }}
+
+# Disable empty passwords
+PermitEmptyPasswords no
+
+# Disable host-based authentication
+HostbasedAuthentication no
+IgnoreRhosts yes
+
+# Security settings
+X11Forwarding {{ ssh_x11_forwarding }}
+PrintMotd {{ ssh_print_motd }}
+PrintLastLog yes
+
+# Accept locale-related environment variables
+AcceptEnv {{ ssh_accept_env }}
+
+# Subsystem for SFTP
+Subsystem {{ ssh_subsystem }}
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+MaxAuthTries 3
+MaxSessions 10
+LoginGraceTime 60
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Key types
+PubkeyAcceptedKeyTypes ssh-ed25519,ssh-ed25519-cert-v01@openssh.com,sk-ssh-ed25519@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,rsa-sha2-256,rsa-sha2-512,rsa-sha2-256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com
+
+# Ciphers and algorithms (strong cryptography only)
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group-exchange-sha256
+
+# Disable tunneling features
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+GatewayPorts no
+PermitTunnel no

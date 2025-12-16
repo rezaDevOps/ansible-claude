@@ -1,0 +1,74 @@
+---
+# Role: firewall
+# Purpose: Configure UFW (Uncomplicated Firewall) with least-privilege rules
+
+- name: Reset UFW to default (clean slate)
+  community.general.ufw:
+    state: reset
+  register: ufw_reset
+
+- name: Set UFW default incoming policy to deny
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set UFW default outgoing policy to allow
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Set UFW default routed policy to deny
+  community.general.ufw:
+    direction: routed
+    policy: deny
+
+- name: Allow SSH from specific IP ranges
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ item }}"
+    comment: "SSH access from {{ item }}"
+  loop: "{{ allowed_ssh_ips }}"
+  when: allowed_ssh_ips is defined and allowed_ssh_ips | length > 0
+
+- name: Allow configured firewall ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment | default('Allow ' + item.port|string) }}"
+  loop: "{{ firewall_allowed_ports }}"
+  when: item.port != 22  # SSH already configured above with IP restrictions
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Enable UFW logging (low level)
+  community.general.ufw:
+    logging: 'low'
+
+- name: Ensure UFW is started and enabled on boot
+  ansible.builtin.systemd:
+    name: ufw
+    state: started
+    enabled: yes
+
+- name: Get UFW status
+  ansible.builtin.command: ufw status verbose
+  register: ufw_status
+  changed_when: false
+
+- name: Display UFW configuration
+  ansible.builtin.debug:
+    msg:
+      - "UFW Firewall configured successfully"
+      - "Default policy: DENY incoming, ALLOW outgoing"
+      - "Allowed ports:"
+      - "  - SSH (22/tcp) from: {{ allowed_ssh_ips | join(', ') }}"
+      - "  - HTTP (80/tcp) from: anywhere"
+      - "  - HTTPS (443/tcp) from: anywhere"
+      - ""
+      - "Current UFW status:"
+      - "{{ ufw_status.stdout_lines }}"

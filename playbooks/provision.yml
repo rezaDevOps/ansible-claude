@@ -1,0 +1,142 @@
+---
+# Playbook to provision AWS EC2 instance
+# Run with: ansible-playbook -i inventory/localhost.ini playbooks/provision.yml
+
+- name: Provision AWS EC2 Instance
+  hosts: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Ensure boto3 and botocore are installed
+      ansible.builtin.pip:
+        name:
+          - boto3
+          - botocore
+        state: present
+      delegate_to: localhost
+      run_once: true
+
+    - name: Get latest Ubuntu 22.04 AMI
+      amazon.aws.ec2_ami_info:
+        region: "{{ aws_region }}"
+        owners: "{{ ami_owner }}"
+        filters:
+          name: "{{ ami_name_filter }}"
+          state: available
+          architecture: x86_64
+          root-device-type: ebs
+          virtualization-type: hvm
+      register: ami_info
+
+    - name: Set AMI ID to latest
+      ansible.builtin.set_fact:
+        ami_id: "{{ ami_info.images | sort(attribute='creation_date') | last | community.general.json_query('image_id') }}"
+
+    - name: Display selected AMI
+      ansible.builtin.debug:
+        msg: "Using AMI: {{ ami_id }}"
+
+    - name: Create security group
+      amazon.aws.ec2_security_group:
+        name: "{{ security_group_name }}"
+        description: "{{ security_group_description }}"
+        region: "{{ aws_region }}"
+        vpc_id: "{{ vpc_id | default(omit) }}"
+        rules:
+          # SSH access
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: "{{ allowed_ssh_ips }}"
+            rule_desc: "SSH access"
+          # HTTP access
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: "0.0.0.0/0"
+            rule_desc: "HTTP access"
+          # HTTPS access
+          - proto: tcp
+            from_port: 443
+            to_port: 443
+            cidr_ip: "0.0.0.0/0"
+            rule_desc: "HTTPS access"
+        rules_egress:
+          # Allow all outbound traffic
+          - proto: -1
+            from_port: -1
+            to_port: -1
+            cidr_ip: "0.0.0.0/0"
+        tags: "{{ instance_tags }}"
+      register: security_group
+
+    - name: Launch EC2 instance
+      amazon.aws.ec2_instance:
+        name: "{{ instance_tags.Name }}"
+        region: "{{ aws_region }}"
+        key_name: "{{ aws_keypair_name }}"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ ami_id }}"
+        security_group: "{{ security_group_name }}"
+        vpc_subnet_id: "{{ subnet_id | default(omit) }}"
+        network:
+          assign_public_ip: true
+        wait: yes
+        wait_timeout: 300
+        state: running
+        tags: "{{ instance_tags }}"
+        volumes:
+          - device_name: /dev/sda1
+            ebs:
+              volume_size: 8
+              volume_type: gp3
+              delete_on_termination: true
+      register: ec2_instance
+
+    - name: Wait for instance to be running
+      ansible.builtin.pause:
+        seconds: 30
+        prompt: "Waiting for instance to initialize..."
+
+    - name: Display instance information
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "EC2 Instance provisioned successfully!"
+          - "=========================================="
+          - "Instance ID: {{ ec2_instance.instances[0].instance_id }}"
+          - "Public IP: {{ ec2_instance.instances[0].public_ip_address }}"
+          - "Private IP: {{ ec2_instance.instances[0].private_ip_address }}"
+          - "State: {{ ec2_instance.instances[0].state.name }}"
+          - ""
+          - "NEXT STEPS:"
+          - "1. Update inventory/hosts.ini with the Public IP above"
+          - "2. Wait 30-60 seconds for SSH to be available"
+          - "3. Test SSH: ssh -i {{ local_ssh_private_key }} ubuntu@{{ ec2_instance.instances[0].public_ip_address }}"
+          - "4. Run: ansible-playbook -i inventory/hosts.ini playbooks/site.yml --private-key {{ local_ssh_private_key }}"
+          - "=========================================="
+
+    - name: Save instance info to file
+      ansible.builtin.copy:
+        content: |
+          # EC2 Instance Information
+          # Generated: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S') }}
+
+          Instance ID: {{ ec2_instance.instances[0].instance_id }}
+          Public IP: {{ ec2_instance.instances[0].public_ip_address }}
+          Private IP: {{ ec2_instance.instances[0].private_ip_address }}
+          Region: {{ aws_region }}
+          Instance Type: {{ instance_type }}
+          AMI ID: {{ ami_id }}
+          Key Pair: {{ aws_keypair_name }}
+          Security Group: {{ security_group_name }}
+
+          SSH Command:
+          ssh -i {{ local_ssh_private_key }} ubuntu@{{ ec2_instance.instances[0].public_ip_address }}
+
+          Update inventory/hosts.ini with this IP:
+          {{ ec2_instance.instances[0].public_ip_address }}
+        dest: "./ec2_instance_info.txt"
+      delegate_to: localhost

@@ -1,0 +1,50 @@
+---
+# Role: users
+# Purpose: Create non-root deployer user with sudo access and SSH key authentication
+
+- name: Ensure deployer group exists
+  ansible.builtin.group:
+    name: "{{ deployer_user }}"
+    state: present
+
+- name: Create deployer user
+  ansible.builtin.user:
+    name: "{{ deployer_user }}"
+    group: "{{ deployer_user }}"
+    groups: sudo
+    shell: /bin/bash
+    create_home: yes
+    home: "/home/{{ deployer_user }}"
+    state: present
+    password: "!"  # Locked password - key-based auth only
+
+- name: Create .ssh directory for deployer
+  ansible.builtin.file:
+    path: "/home/{{ deployer_user }}/.ssh"
+    state: directory
+    owner: "{{ deployer_user }}"
+    group: "{{ deployer_user }}"
+    mode: '0700'
+
+- name: Add SSH public key for deployer
+  ansible.posix.authorized_key:
+    user: "{{ deployer_user }}"
+    key: "{{ deployer_ssh_public_key }}"
+    state: present
+    exclusive: no
+
+- name: Ensure deployer has passwordless sudo
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers.d/{{ deployer_user }}
+    line: "{{ deployer_user }} ALL=(ALL) NOPASSWD:ALL"
+    create: yes
+    validate: 'visudo -cf %s'
+    mode: '0440'
+
+- name: Display user creation success
+  ansible.builtin.debug:
+    msg:
+      - "User '{{ deployer_user }}' created successfully"
+      - "SSH key authentication configured"
+      - "Passwordless sudo enabled"
+      - "After this playbook completes, you can SSH as: ssh -i {{ local_ssh_private_key }} {{ deployer_user }}@{{ ansible_host }}"

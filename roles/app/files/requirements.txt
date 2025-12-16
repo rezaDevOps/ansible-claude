@@ -1,0 +1,9 @@
+# Flask application dependencies
+# Install with: pip install -r requirements.txt
+
+Flask==3.0.0
+gunicorn==21.2.0
+Werkzeug==3.0.1
+
+# Optional: for better production performance
+gevent==23.9.1

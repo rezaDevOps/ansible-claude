@@ -1,0 +1,105 @@
+---
+# Role: app
+# Purpose: Deploy Flask application with virtualenv and systemd service
+
+- name: Create application directory
+  ansible.builtin.file:
+    path: "{{ app_root }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Create log directory for application
+  ansible.builtin.file:
+    path: "/var/log/{{ app_name }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Copy Flask application file
+  ansible.builtin.copy:
+    src: app.py
+    dest: "{{ app_root }}/app.py"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+  notify: restart app
+
+- name: Copy requirements.txt
+  ansible.builtin.copy:
+    src: requirements.txt
+    dest: "{{ app_root }}/requirements.txt"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: "{{ python_version }} -m venv {{ venv_path }}"
+    creates: "{{ venv_path }}/bin/activate"
+  become_user: "{{ app_user }}"
+
+- name: Upgrade pip in virtual environment
+  ansible.builtin.pip:
+    name: pip
+    state: latest
+    virtualenv: "{{ venv_path }}"
+    virtualenv_command: "{{ python_version }} -m venv"
+  become_user: "{{ app_user }}"
+
+- name: Install Python dependencies in virtual environment
+  ansible.builtin.pip:
+    requirements: "{{ app_root }}/requirements.txt"
+    virtualenv: "{{ venv_path }}"
+    virtualenv_command: "{{ python_version }} -m venv"
+  become_user: "{{ app_user }}"
+  notify: restart app
+
+- name: Deploy systemd service file
+  ansible.builtin.template:
+    src: myapp.service.j2
+    dest: "/etc/systemd/system/{{ app_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart app
+
+- name: Ensure systemd is reloaded (flush handlers if needed)
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start application service
+  ansible.builtin.systemd:
+    name: "{{ app_name }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: Wait for application to be ready
+  ansible.builtin.wait_for:
+    port: "{{ app_port }}"
+    host: 127.0.0.1
+    delay: 2
+    timeout: 30
+
+- name: Test application endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ app_port }}/"
+    return_content: yes
+  register: app_test
+  retries: 3
+  delay: 2
+  until: app_test.status == 200
+
+- name: Display application deployment status
+  ansible.builtin.debug:
+    msg:
+      - "Flask application deployed successfully"
+      - "Application root: {{ app_root }}"
+      - "Virtual environment: {{ venv_path }}"
+      - "Service name: {{ app_name }}"
+      - "Listening on: 127.0.0.1:{{ app_port }}"
+      - "Status: {{ app_test.json.status if app_test.json is defined else 'running' }}"

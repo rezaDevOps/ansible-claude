@@ -1,0 +1,48 @@
+# Systemd service unit for Flask application
+# Managed by Ansible - DO NOT EDIT MANUALLY
+
+[Unit]
+Description={{ systemd_service_description }}
+After=network.target
+
+[Service]
+Type=notify
+User={{ app_user }}
+Group={{ app_group }}
+WorkingDirectory={{ app_root }}
+
+# Environment variables
+Environment="PATH={{ venv_path }}/bin"
+Environment="FLASK_APP=app.py"
+Environment="FLASK_ENV=production"
+Environment="PORT={{ app_port }}"
+Environment="HOST=127.0.0.1"
+
+# Start command with Gunicorn
+ExecStart={{ venv_path }}/bin/gunicorn \
+    --bind 127.0.0.1:{{ app_port }} \
+    --workers 4 \
+    --worker-class gevent \
+    --timeout 120 \
+    --access-logfile /var/log/{{ app_name }}/access.log \
+    --error-logfile /var/log/{{ app_name }}/error.log \
+    --log-level info \
+    app:app
+
+# Restart policy
+Restart={{ systemd_restart_policy }}
+RestartSec={{ systemd_restart_sec }}
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ app_root }} /var/log/{{ app_name }}
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,214 @@
+---
+name: Test Ansible Changes
+
+on:
+  pull_request:
+    paths:
+      - '**.yml'
+      - '**.yaml'
+      - 'roles/**'
+      - 'playbooks/**'
+      - 'group_vars/**'
+      - 'inventory/**'
+
+jobs:
+  test-roles:
+    name: Test Ansible Roles
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        role:
+          - users
+          - base
+          - firewall
+          - app
+          - nginx
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible ansible-lint molecule molecule-plugins[docker] docker
+
+      - name: Validate role structure - ${{ matrix.role }}
+        run: |
+          echo "Checking role: roles/${{ matrix.role }}"
+          if [ -f "roles/${{ matrix.role }}/tasks/main.yml" ]; then
+            echo "✓ tasks/main.yml exists"
+            ansible-playbook --syntax-check roles/${{ matrix.role }}/tasks/main.yml
+          else
+            echo "✗ tasks/main.yml not found"
+            exit 1
+          fi
+
+      - name: Check for required role files
+        run: |
+          role_path="roles/${{ matrix.role }}"
+          echo "Checking role structure for: ${{ matrix.role }}"
+
+          # Check for handlers if they exist
+          if [ -f "$role_path/handlers/main.yml" ]; then
+            echo "✓ handlers/main.yml found"
+          fi
+
+          # Check for vars if they exist
+          if [ -f "$role_path/vars/main.yml" ]; then
+            echo "✓ vars/main.yml found"
+          fi
+
+          # Check for defaults if they exist
+          if [ -f "$role_path/defaults/main.yml" ]; then
+            echo "✓ defaults/main.yml found"
+          fi
+
+  validate-inventory:
+    name: Validate Inventory Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible
+
+      - name: List inventory
+        run: |
+          if [ -f "inventory/hosts.ini" ]; then
+            echo "Inventory file structure:"
+            cat inventory/hosts.ini
+          else
+            echo "Warning: inventory/hosts.ini not found"
+          fi
+
+      - name: Validate Ansible configuration
+        run: |
+          if [ -f "ansible.cfg" ]; then
+            echo "✓ ansible.cfg found"
+            cat ansible.cfg
+          else
+            echo "⚠ ansible.cfg not found (optional)"
+          fi
+
+  check-vars:
+    name: Validate Variables
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for sensitive data
+        run: |
+          echo "Scanning for potential sensitive data in plain text..."
+
+          # Check for common patterns that might indicate exposed secrets
+          if grep -r "AKIA" --include="*.yml" --include="*.yaml" .; then
+            echo "⚠ Warning: Potential AWS access key found!"
+            exit 1
+          fi
+
+          if grep -r "BEGIN.*PRIVATE KEY" --include="*.yml" --include="*.yaml" .; then
+            echo "⚠ Warning: Potential private key found in plain text!"
+            exit 1
+          fi
+
+          echo "✓ No obvious sensitive data found"
+
+      - name: Validate variable files
+        run: |
+          echo "Checking variable files..."
+
+          if [ -f "group_vars/all.yml" ]; then
+            echo "✓ group_vars/all.yml exists"
+          fi
+
+          if [ -f "group_vars/vault.yml" ]; then
+            echo "✓ group_vars/vault.yml exists (should be encrypted)"
+            # Check if vault file is encrypted
+            if head -n 1 group_vars/vault.yml | grep -q "\$ANSIBLE_VAULT"; then
+              echo "✓ vault.yml is properly encrypted"
+            else
+              echo "✗ ERROR: vault.yml is NOT encrypted!"
+              echo ""
+              echo "SECURITY ISSUE: vault.yml contains sensitive data and must be encrypted!"
+              echo ""
+              echo "Fix this by running:"
+              echo "  ./scripts/vault-setup.sh"
+              echo ""
+              exit 1
+            fi
+          else
+            echo "⚠ Warning: group_vars/vault.yml not found"
+          fi
+
+      - name: Verify vault password is not committed
+        run: |
+          echo "Checking for committed vault passwords..."
+
+          # Check if .vault_pass or vault_pass.txt exist in git
+          if git ls-files --error-unmatch .vault_pass 2>/dev/null; then
+            echo "✗ ERROR: .vault_pass is committed to git!"
+            exit 1
+          fi
+
+          if git ls-files --error-unmatch vault_pass.txt 2>/dev/null; then
+            echo "✗ ERROR: vault_pass.txt is committed to git!"
+            exit 1
+          fi
+
+          echo "✓ No vault password files committed"
+
+  test-playbook-includes:
+    name: Test Playbook Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Check playbook dependencies
+        run: |
+          echo "Checking if all referenced roles exist..."
+
+          for playbook in playbooks/*.yml; do
+            echo "Analyzing: $playbook"
+
+            # Extract role names from playbook
+            roles=$(grep -E "^\s+- role:" "$playbook" | sed 's/.*role:\s*//' || true)
+
+            for role in $roles; do
+              if [ -d "roles/$role" ]; then
+                echo "  ✓ Role '$role' exists"
+              else
+                echo "  ✗ Role '$role' not found!"
+                exit 1
+              fi
+            done
+          done

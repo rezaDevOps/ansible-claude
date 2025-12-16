@@ -1,0 +1,111 @@
+---
+# Non-sensitive variables for all hosts
+# Edit all REPLACE_ME values before running playbooks
+
+# ============================================================================
+# AWS Configuration
+# ============================================================================
+aws_region: "us-west-2"  # e.g., us-east-1, eu-west-1, ap-southeast-1
+aws_keypair_name: "ansible-ec2-keypair"  # Name of AWS EC2 key pair
+instance_type: "t3.micro"
+ami_name_filter: "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+ami_owner: "099720109477"  # Canonical (Ubuntu official)
+
+# Security Group Configuration
+security_group_name: "ansible-ec2-sg"
+security_group_description: "Security group for Ansible-managed EC2 instance"
+
+# Network Configuration (leave empty to use default VPC)
+vpc_id: ""  # Leave empty for default VPC, or specify vpc-xxxxx
+subnet_id: ""  # Leave empty for default subnet, or specify subnet-xxxxx
+
+# Tags for EC2 instance
+instance_tags:
+  Name: "ansible-managed-ec2"
+  Environment: "production"
+  ManagedBy: "ansible"
+  Project: "flask-deployment"
+
+# ============================================================================
+# SSH Configuration
+# ============================================================================
+local_ssh_private_key: "~/.ssh/ansible-ec2-key"
+deployer_user: "deployer"
+deployer_ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDOHXsnKEABjrGWyFaqfkiGKdrFCBXbfFDdG2EEgAbrwllccp4tSibIFY93KsAc6deXQqc7i5/nYd6wYdVOGreBzYBQspYqeNxZpuZYh85Sw0GtoX1HwwNc5F8o61uDusGoo++6LWw1QErwdid6qRMoAZm5LtUfin9cquYYPWO5v6595WzaORgyTIv9uXO29YLR3wem+hekhKqejS2KLfLzRJ1URu/i2+QLgHAHueFJzndEzLMVZWXD9AJZwvLDn8awV2KtjNWymajNvLxu2Xr7h5INvId4D1wCDjfRWrrR8MF40nI1z41pylIh2RD8YWhys4DVXbF85SXqAxH5q6dy1yozCQI1WFqflS059pCjYJ6MyDkodLkih3H4kr6b3RS8jcSAtfonJaFbbqVtY7NnwsVwdIsmBJpl9Xgu9WGJH7O8idf0HYSA0XXUGVf9R9GVAPSYtPKwFIGv9ulPxbejOwZnbVWsu8MOAtGEE8ZOLJHjvOF+s0lxnjwn/UkhworkUe/gq7IrOFmOY3jrS2WnxTqkLlKCR2hoj1hIGTtEEuSlAnxJyDp2m6KsdJPHCd1faMXl/lN2L/gcaslq4Ovj2WTzytaEdOszkV+5hCKmoy2m+evI+5iJvCxz2w3cTXHJsLJmSle9PtERq4I2HA9woLJ7Oa3hWcCeV5wFn+5Dtw== admin@MacBookPro.fritz.box"
+
+# IP ranges allowed to SSH (CIDR notation)
+# IMPORTANT: Restrict this to your IP range for better security!
+# Example: ["1.2.3.4/32"] for a single IP
+# Use curl ifconfig.me to get your public IP
+allowed_ssh_ips:
+  - "0.0.0.0/0"  # WARNING: Allows SSH from anywhere - CHANGE THIS!
+
+# ============================================================================
+# Application Configuration
+# ============================================================================
+app_name: "myapp"
+app_user: "{{ deployer_user }}"
+app_group: "{{ deployer_user }}"
+app_root: "/opt/{{ app_name }}"
+app_port: 5000
+
+# Domain configuration (use IP if no domain)
+app_domain: "{{ ansible_host }}"  # Will use EC2 public IP
+# app_domain: "REPLACE_ME_yourdomain.com"  # Uncomment and set if you have a domain
+
+# Python/virtualenv
+python_version: "python3.10"
+venv_path: "{{ app_root }}/venv"
+
+# ============================================================================
+# System Configuration
+# ============================================================================
+# Timezone
+system_timezone: "UTC"
+
+# Automatic security updates
+enable_unattended_upgrades: true
+
+# Fail2ban configuration
+fail2ban_bantime: "1h"
+fail2ban_findtime: "10m"
+fail2ban_maxretry: 5
+
+# UFW Firewall ports
+firewall_allowed_ports:
+  - { port: 22, proto: "tcp", comment: "SSH" }
+  - { port: 80, proto: "tcp", comment: "HTTP" }
+  - { port: 443, proto: "tcp", comment: "HTTPS" }
+
+# ============================================================================
+# NGINX Configuration
+# ============================================================================
+nginx_worker_processes: "auto"
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+nginx_client_max_body_size: "10M"
+
+# Upstream configuration for Flask app
+nginx_upstream_servers:
+  - "127.0.0.1:{{ app_port }}"
+
+# ============================================================================
+# Systemd Service Configuration
+# ============================================================================
+systemd_service_description: "Flask Application Service"
+systemd_restart_policy: "always"
+systemd_restart_sec: "5"
+
+# ============================================================================
+# Security Hardening
+# ============================================================================
+ssh_port: 22
+ssh_permit_root_login: "no"
+ssh_password_authentication: "no"
+ssh_pubkey_authentication: "yes"
+ssh_challenge_response_auth: "no"
+ssh_use_pam: "yes"
+ssh_x11_forwarding: "no"
+ssh_print_motd: "no"
+ssh_accept_env: "LANG LC_*"
+ssh_subsystem: "sftp /usr/lib/openssh/sftp-server"

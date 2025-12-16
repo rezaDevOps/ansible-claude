@@ -1,0 +1,149 @@
+---
+# Cleanup playbook to destroy all AWS resources
+# Run with: ansible-playbook -i inventory/localhost.ini playbooks/cleanup.yml
+#
+# WARNING: This will permanently delete:
+# - EC2 instance
+# - Security group
+# - All associated resources
+#
+# Use with caution!
+
+- name: Cleanup AWS Resources
+  hosts: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars_prompt:
+    - name: confirm_destroy
+      prompt: "Are you sure you want to DESTROY all resources? Type 'yes' to confirm"
+      private: no
+
+  tasks:
+    - name: Abort if not confirmed
+      ansible.builtin.fail:
+        msg: "Cleanup aborted. You must type 'yes' to confirm destruction."
+      when: confirm_destroy != 'yes'
+
+    - name: Display resources to be destroyed
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "The following resources will be DESTROYED:"
+          - "=========================================="
+          - "Region: {{ aws_region }}"
+          - "Instance tag: Name=ansible-managed-ec2"
+          - "Security group: {{ security_group_name }}"
+          - "Key pair: {{ aws_keypair_name }}"
+          - "=========================================="
+
+    - name: Pause for 5 seconds (last chance to cancel with Ctrl+C)
+      ansible.builtin.pause:
+        seconds: 5
+        prompt: "Destroying in 5 seconds... Press Ctrl+C to cancel!"
+
+    - name: Find EC2 instances with ansible-managed tag
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "ansible-managed-ec2"
+          instance-state-name:
+            - running
+            - stopped
+            - stopping
+            - pending
+      register: ec2_instances
+
+    - name: Display found instances
+      ansible.builtin.debug:
+        msg: "Found {{ ec2_instances.instances | length }} instance(s) to terminate"
+
+    - name: Terminate EC2 instances
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ item.instance_id }}"
+        region: "{{ aws_region }}"
+        state: absent
+        wait: yes
+        wait_timeout: 300
+      loop: "{{ ec2_instances.instances }}"
+      when: ec2_instances.instances | length > 0
+      register: terminated_instances
+
+    - name: Wait for instances to be fully terminated
+      ansible.builtin.pause:
+        seconds: 30
+        prompt: "Waiting for instances to terminate completely..."
+      when: ec2_instances.instances | length > 0
+
+    - name: Get security group information
+      amazon.aws.ec2_security_group_info:
+        region: "{{ aws_region }}"
+        filters:
+          group-name: "{{ security_group_name }}"
+      register: security_groups
+
+    - name: Delete security group
+      amazon.aws.ec2_security_group:
+        name: "{{ security_group_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+      when: security_groups.security_groups | length > 0
+      register: sg_deleted
+      retries: 5
+      delay: 10
+      until: sg_deleted is succeeded
+
+    - name: Check if EC2 key pair exists
+      amazon.aws.ec2_key_info:
+        region: "{{ aws_region }}"
+        names:
+          - "{{ aws_keypair_name }}"
+      register: key_pair_info
+      failed_when: false
+
+    - name: Delete EC2 key pair from AWS
+      amazon.aws.ec2_key:
+        name: "{{ aws_keypair_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+      when: key_pair_info.keypairs | length > 0
+
+    - name: Display cleanup summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "Cleanup completed successfully!"
+          - "=========================================="
+          - "Resources destroyed:"
+          - "  - EC2 instances: {{ ec2_instances.instances | length }}"
+          - "  - Security group: {{ 'deleted' if sg_deleted is succeeded else 'not found' }}"
+          - "  - Key pair: {{ 'deleted' if key_pair_info.keypairs | length > 0 else 'not found' }}"
+          - ""
+          - "Local cleanup (optional):"
+          - "  - Remove EC2 IP from inventory/hosts.ini"
+          - "  - Delete ec2_instance_info.txt (if exists)"
+          - "  - Remove SSH keys:"
+          - "    rm {{ local_ssh_private_key }}"
+          - "    rm ~/.ssh/deployer-key"
+          - "=========================================="
+
+    - name: Save cleanup log
+      ansible.builtin.copy:
+        content: |
+          # AWS Cleanup Log
+          # Generated: {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S') }}
+
+          Region: {{ aws_region }}
+          Instances terminated: {{ ec2_instances.instances | length }}
+          Security group deleted: {{ security_group_name }}
+          Key pair deleted: {{ aws_keypair_name }}
+
+          Terminated instance IDs:
+          {% for instance in ec2_instances.instances %}
+          - {{ instance.instance_id }} ({{ instance.public_ip_address | default('no-ip') }})
+          {% endfor %}
+
+          All AWS resources have been destroyed.
+        dest: "./cleanup_log_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}.txt"
+      delegate_to: localhost

@@ -1,0 +1,223 @@
+---
+name: Ansible CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to target environment'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  ANSIBLE_FORCE_COLOR: '1'
+  ANSIBLE_HOST_KEY_CHECKING: 'false'
+
+jobs:
+  lint:
+    name: Lint Ansible Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible ansible-lint yamllint
+
+      - name: Run yamllint
+        run: |
+          yamllint -c .yamllint.yml .
+        continue-on-error: true
+
+      - name: Run ansible-lint
+        run: |
+          ansible-lint playbooks/*.yml roles/*/tasks/*.yml
+
+      - name: Check Ansible version
+        run: ansible --version
+
+  syntax-check:
+    name: Syntax Check Playbooks
+    runs-on: ubuntu-latest
+    needs: lint
+
+    strategy:
+      matrix:
+        playbook:
+          - playbooks/site.yml
+          - playbooks/provision.yml
+          - playbooks/cleanup.yml
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible boto3 botocore
+
+      - name: Syntax check - ${{ matrix.playbook }}
+        run: |
+          ansible-playbook ${{ matrix.playbook }} --syntax-check
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  dry-run:
+    name: Dry Run Deployment
+    runs-on: ubuntu-latest
+    needs: [lint, syntax-check]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible boto3 botocore
+
+      - name: Run dry-run (check mode)
+        run: |
+          echo "This would run: ansible-playbook playbooks/site.yml --check"
+          echo "Skipping actual execution in CI (requires AWS credentials and inventory)"
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [lint, syntax-check, security-scan]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deploy == 'true' &&
+      github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Ansible and AWS dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible boto3 botocore
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ansible-ec2-key
+          chmod 600 ~/.ssh/ansible-ec2-key
+
+      - name: Setup Ansible Vault password
+        run: |
+          echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass
+          chmod 600 .vault_pass
+
+      - name: Verify vault file is encrypted
+        run: |
+          if ! head -n 1 group_vars/vault.yml | grep -q "\$ANSIBLE_VAULT"; then
+            echo "ERROR: vault.yml is not encrypted!"
+            echo "Run: ./scripts/vault-setup.sh"
+            exit 1
+          fi
+          echo "✓ vault.yml is properly encrypted"
+
+      - name: Provision EC2 instance (if needed)
+        run: |
+          ansible-playbook playbooks/provision.yml \
+            -e "aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -e "aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --vault-password-file .vault_pass
+
+      - name: Deploy application
+        run: |
+          ansible-playbook -i inventory/hosts.ini playbooks/site.yml \
+            --private-key ~/.ssh/ansible-ec2-key \
+            --vault-password-file .vault_pass
+
+      - name: Verify deployment
+        run: |
+          echo "Deployment completed successfully"
+          # Add custom verification commands here
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f ~/.ssh/ansible-ec2-key
+          rm -f .vault_pass
+
+  notification:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+
+    steps:
+      - name: Send success notification
+        if: needs.deploy.result == 'success'
+        run: |
+          echo "Deployment successful! Add Slack/Discord/Email notification here"
+          # Example: curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful!"}' ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Send failure notification
+        if: needs.deploy.result == 'failure'
+        run: |
+          echo "Deployment failed! Add Slack/Discord/Email notification here"
+          # Example: curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment failed!"}' ${{ secrets.SLACK_WEBHOOK }}

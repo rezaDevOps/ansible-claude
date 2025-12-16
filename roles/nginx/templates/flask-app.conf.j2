@@ -1,0 +1,116 @@
+# NGINX configuration for Flask application
+# Managed by Ansible - DO NOT EDIT MANUALLY
+
+upstream {{ app_name }}_backend {
+{% for server in nginx_upstream_servers %}
+    server {{ server }};
+{% endfor %}
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name {{ app_domain }};
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    # Logging
+    access_log /var/log/nginx/{{ app_name }}_access.log;
+    error_log /var/log/nginx/{{ app_name }}_error.log;
+
+    # Max upload size
+    client_max_body_size {{ nginx_client_max_body_size }};
+
+    # Proxy settings
+    location / {
+        proxy_pass http://{{ app_name }}_backend;
+        proxy_redirect off;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # Buffering
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+        proxy_busy_buffers_size 8k;
+
+        # HTTP version and connection settings
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # Health check endpoint (direct, no caching)
+    location /health {
+        proxy_pass http://{{ app_name }}_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        access_log off;
+    }
+
+    # Static files (if any)
+    location /static {
+        alias {{ app_root }}/static;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+
+    # Deny access to backup files
+    location ~ ~$ {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+}
+
+# Uncomment below for HTTPS (after obtaining SSL certificate)
+# server {
+#     listen 443 ssl http2;
+#     listen [::]:443 ssl http2;
+#
+#     server_name {{ app_domain }};
+#
+#     # SSL certificate paths (update after running certbot)
+#     ssl_certificate /etc/letsencrypt/live/{{ app_domain }}/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/{{ app_domain }}/privkey.pem;
+#
+#     # SSL settings
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#     ssl_ciphers HIGH:!aNULL:!MD5;
+#     ssl_prefer_server_ciphers on;
+#     ssl_session_cache shared:SSL:10m;
+#     ssl_session_timeout 10m;
+#
+#     # HSTS
+#     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+#
+#     # Same location blocks as above...
+# }
+#
+# # Redirect HTTP to HTTPS
+# server {
+#     listen 80;
+#     listen [::]:80;
+#     server_name {{ app_domain }};
+#     return 301 https://$server_name$request_uri;
+# }
