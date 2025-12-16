@@ -18,6 +18,55 @@
       delegate_to: localhost
       run_once: true
 
+    - name: Check if EC2 key pair exists in AWS
+      amazon.aws.ec2_key_info:
+        region: "{{ aws_region }}"
+        names:
+          - "{{ aws_keypair_name }}"
+      register: key_pair_check
+      ignore_errors: true
+
+    - name: Create EC2 key pair in AWS if it doesn't exist
+      amazon.aws.ec2_key:
+        name: "{{ aws_keypair_name }}"
+        region: "{{ aws_region }}"
+        state: present
+      register: ec2_key_result
+      when: key_pair_check.keypairs | length == 0
+
+    - name: Save private key to file if new key was created (local only)
+      ansible.builtin.copy:
+        content: "{{ ec2_key_result.key.private_key }}"
+        dest: "{{ playbook_dir }}/../ansible-ec2-key-NEW.pem"
+        mode: '0600'
+      delegate_to: localhost
+      when:
+        - ec2_key_result.changed | default(false)
+        - ec2_key_result.key.private_key is defined
+        - lookup('env', 'CI') == ''  # Only save locally, not in CI
+
+    - name: Display IMPORTANT message if new key was created
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "⚠️  NEW SSH KEY PAIR CREATED!"
+          - "=========================================="
+          - "Key name: {{ aws_keypair_name }}"
+          - "Private key saved to: {{ playbook_dir }}/../ansible-ec2-key-NEW.pem"
+          - ""
+          - "IMPORTANT: You must update GitHub Secret 'SSH_PRIVATE_KEY'"
+          - "Run: cat {{ playbook_dir }}/../ansible-ec2-key-NEW.pem"
+          - "Copy the content to GitHub Repository Secrets as SSH_PRIVATE_KEY"
+          - "=========================================="
+      when:
+        - ec2_key_result.changed | default(false)
+        - lookup('env', 'CI') == ''
+
+    - name: Display key pair status
+      ansible.builtin.debug:
+        msg: "✓ Using existing EC2 key pair: {{ aws_keypair_name }}"
+      when: key_pair_check.keypairs | length > 0
+
     - name: Get latest Ubuntu 22.04 AMI
       amazon.aws.ec2_ami_info:
         region: "{{ aws_region }}"
