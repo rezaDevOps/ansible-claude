@@ -21,13 +21,6 @@ skip_list:
 # Enable offline mode (no internet required for linting)
 offline: false
 
-# Set maximum line length
-max_line_length: 160
-
-# Enable specific rules
-enable_list:
-  - yaml
-
 # Warning list (won't fail, just warn)
 warn_list:
   - experimental
