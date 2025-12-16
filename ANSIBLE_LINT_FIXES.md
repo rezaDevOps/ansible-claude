@@ -26,8 +26,13 @@ skip_list:
   - yaml[line-length]  # Zeilenlänge wird von yamllint gehandhabt
 
 warn_list:
+  - experimental
+  - jinja[spacing]
+  - package-latest
   - no-role-prefix  # Warning statt Error für fehlende Präfixe
 ```
+
+**Wichtig:** `max_line_length` wurde entfernt, da es keine gültige ansible-lint Option ist. Die Zeilenlänge wird von yamllint kontrolliert.
 
 ### 2. Handler-Namen (Name Casing) ✅
 
